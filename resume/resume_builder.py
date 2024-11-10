@@ -3,6 +3,7 @@ import pandas as pd
 from fpdf import FPDF
 from transformers import pipeline
 import datetime
+import random
 
 # Initialize Hugging Face text generation model
 generator = pipeline("text-generation", model="gpt2")
@@ -20,11 +21,40 @@ proficiency_suggestions = {
     "Data Scientist": {"Python": "Advanced", "Data Analysis": "Advanced", "SQL": "Intermediate"},
 }
 
-def generate_description(position, company):
-    prompt = f"Write a concise and professional job description for a {position} role at {company}. Include 3-4 key responsibilities, 3-4 required skills, and any specific experience necessary for this role."
-    response = generator(prompt, max_length=150, num_return_sequences=1)
-    return response[0]['generated_text'].strip()
-
+def generate_description(profession, skills, skill_proficiency, education, work_experiences):
+    templates = [
+        "As a {profession} with a background in {education}, I have developed expertise in {skills_list}. With a strong proficiency in {key_skill} ({key_skill_level}), I have successfully contributed to projects at {latest_company}, where I {latest_experience}.",
+        "With a solid foundation in {education} and hands-on experience in {skills_list}, I am a dedicated {profession}. My {key_skill} skills at {key_skill_level} level have proven valuable at {latest_company}, where I recently {latest_experience}.",
+        "I am an experienced {profession} skilled in {skills_list}. Leveraging my {key_skill} skills ({key_skill_level}), I’ve made meaningful contributions at {latest_company} by {latest_experience}. My educational background in {education} supports my technical proficiency and problem-solving skills.",
+        "In my role as a {profession}, I bring a wealth of knowledge in {skills_list} and am particularly proficient in {key_skill} ({key_skill_level}). My educational journey in {education} has equipped me to excel in demanding projects, such as those at {latest_company}, where I {latest_experience}."
+    ]
+    
+    # Choose a random template
+    template = random.choice(templates)
+    
+    # Process skills and skill proficiency
+    skills_list = ', '.join([f"{skill} ({level})" for skill, level in skill_proficiency.items()])
+    key_skill, key_skill_level = list(skill_proficiency.items())[0] if skill_proficiency else ("N/A", "N/A")
+    
+    # Get the latest work experience
+    latest_experience = "worked on key projects"  # Default text if no experiences are provided
+    latest_company = "previous employers"         # Default company if no experiences are provided
+    if work_experiences:
+        latest_experience = work_experiences[-1].get("description", latest_experience)
+        latest_company = work_experiences[-1].get("company", latest_company)
+    
+    # Fill the template with provided information
+    description = template.format(
+        profession=profession,
+        education=education['Level'],
+        skills_list=skills_list,
+        key_skill=key_skill,
+        key_skill_level=key_skill_level,
+        latest_company=latest_company,
+        latest_experience=latest_experience
+    )
+    
+    return description
 
 def generate_pdf(resume_data):
     pdf = FPDF()
@@ -75,7 +105,7 @@ def generate_pdf(resume_data):
         pdf.set_font("Arial", "B", 12)
         pdf.cell(200, 10, txt=f"{exp['position']} at {exp['company']}", ln=True)
         pdf.set_font("Arial", "", 12)
-        pdf.cell(200, 10, txt=f"{exp['start_date'].strftime('%Y-%m-%d')} to {exp['end_date'].strftime('%Y-%m-%d')}", ln=True)
+        pdf.cell(200, 10, txt=f"{exp['start_date']} to {exp['end_date']}", ln=True)
         pdf.multi_cell(0, 10, txt=exp['description'])
         pdf.ln(5)
 
@@ -88,7 +118,6 @@ def generate_pdf(resume_data):
     pdf_output = "generated_resume.pdf"
     pdf.output(pdf_output)
     return pdf_output
-
 
 def run():
     st.title("AI Resume Builder")
@@ -132,40 +161,32 @@ def run():
         position = st.text_input(f"Position", key=f"position_{i}")
         start_date = st.date_input(f"Start Date", key=f"start_date_{i}")
         end_date = st.date_input(f"End Date", key=f"end_date_{i}")
-        description = generate_description(position, company)
-        st.text_area(f"Description", key=f"description_{i}", value=description, height=100)
+        description = st.text_area(f"Description", key=f"description_{i}", height=100)
 
         experiences.append({
             "company": company,
             "position": position,
-            "start_date": start_date,
-            "end_date": end_date,
-            "description": description
+            "start_date": start_date.strftime('%Y-%m-%d'),
+            "end_date": end_date.strftime('%Y-%m-%d'),
+            "description": description or "Worked on various projects contributing to company goals."
         })
 
-    # Button to generate resume and PDF download
+    # Generate description and resume
+    st.header("Generate Resume")
     if st.button("Generate Resume"):
-        resume = {
-            "Personal Information": {
-                "Name": name,
-                "Email": email,
-                "Phone": phone
-            },
+        resume_data = {
+            "Personal Information": {"Name": name, "Email": email, "Phone": phone},
             "Profession": profession,
             "Skills": skill_proficiency,
-            "Education": {
-                "Level": education_level,
-                "Institution": institution,
-                "Graduation Year": graduation_year
-            },
+            "Education": {"Level": education_level, "Institution": institution, "Graduation Year": graduation_year},
             "Work Experience": experiences
         }
-        st.json(resume)
+        
+        description = generate_description(profession, selected_skills, skill_proficiency, resume_data['Education'], experiences)
+        st.write(description)
 
-        # Generate and download PDF
-        pdf_path = generate_pdf(resume)
-        with open(pdf_path, "rb") as file:
-            st.download_button("Download Resume as PDF", file, file_name="resume.pdf")
+        pdf_path = generate_pdf(resume_data)
+        with open(pdf_path, "rb") as pdf_file:
+            st.download_button(label="Download Resume", data=pdf_file, file_name="resume.pdf", mime="application/pdf")
 
-if __name__ == "__main__":
-    run()
+run()
